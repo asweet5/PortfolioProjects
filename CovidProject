@@ -1,0 +1,129 @@
+Select location, date, total_cases, new_cases, total_deaths, population
+From CovidDeaths
+Where total_cases is Not Null
+Order By location, date
+
+-- Deaths per case worldwide
+
+Select location, date, total_cases, total_deaths, round(Cast(total_deaths as float) / cast(total_cases as float) * 100, 2) as PercentageDeaths
+From CovidDeaths
+Where total_cases is Not Null
+Order By location, date
+
+-- Deaths per case UK
+
+Select location, date, total_cases, total_deaths, round(Cast(total_deaths as float) / cast(total_cases as float) * 100, 2) as PercentageDeaths
+From CovidDeaths
+Where location like '%kingdom%' and total_cases is Not Null
+Order By location, date
+
+-- total cases vs population
+
+Select location, date, total_cases, population, round(cast(total_cases as float) / cast(population as float) * 100,2) as PercentInfectedPerDay
+From CovidDeaths
+Where total_cases is Not Null
+Order By location, date
+
+-- max infection rate
+
+Select location, max(total_cases) as TotalCases, round(cast(max(total_cases) as float) /cast(population as float) * 100, 2) as PercentOfPopulationInfected
+From CovidDeaths
+Where continent is Not Null
+Group by location, population
+Order By PercentOfPopulationInfected desc
+
+-- Death rate per country
+
+Select location, max(total_deaths) as TotalDeaths, round(cast(max(total_deaths) as float) /cast(population as float) * 100, 2) as PercentOfPopulationKilled
+From CovidDeaths
+Where continent is Not Null
+Group by location, population
+Order By PercentOfPopulationKilled desc
+
+-- Death rate per continent
+
+Select location, max(total_deaths) as TotalDeaths, round(cast(max(total_deaths) as float) /cast(max(population) as float) * 100, 2) as PercentOfPopulationKilled
+From CovidDeaths
+Where continent is Null and iso_code like '%AFR%' or iso_code like '%OCE%' or iso_code like '%ASI%' or iso_code like '%EUR%' or iso_code like '%OWID_NAM%' or iso_code like '%SAM%'
+Group by location
+Order By PercentOfPopulationKilled desc
+
+-- Global stats
+
+Select SUM(new_cases) as TotalCases, SUM(new_deaths) as TotalDeaths, round(SUM(cast(new_deaths as float))/SUM(cast(New_Cases as float))*100, 2) as DeathPercentage
+From CovidDeaths
+Where continent is Not Null
+
+-- Joins tables to show Cases, Population and vaccinations
+
+Select deaths.continent, deaths.location, deaths.date, deaths.population, deaths.total_cases, vaccines.new_vaccinations
+From CovidDeaths as deaths
+Join CovidVaccinations as vaccines
+On deaths.date = vaccines.date and deaths.location = vaccines.location
+Where deaths.continent is Not NULL and deaths.total_cases is Not Null
+Order by deaths.location, deaths.date
+
+--  Cumulative vaccinations
+
+Select deaths.continent, deaths.location, deaths.date, deaths.population, deaths.total_cases, vaccines.new_vaccinations, sum(cast(vaccines.new_vaccinations as bigint)) Over (Partition by deaths.location Order by deaths.location, deaths.date) as CumulativeVaccinations
+From CovidDeaths as deaths
+Join CovidVaccinations as vaccines
+On deaths.date = vaccines.date and deaths.location = vaccines.location
+Where deaths.continent is Not NULL and deaths.total_cases is Not Null
+Order by deaths.location, deaths.date
+
+-- Carry out calculations on cumulative vaccinations data from previous query
+
+-- CTE
+
+With PopulationVaccinated (Continent, Location, Date, Population, TotalCases, NewVaccines, CumulativeVaccinations)
+as
+(
+Select deaths.continent, deaths.location, deaths.date, deaths.population, deaths.total_cases, vaccines.new_vaccinations, sum(cast(vaccines.new_vaccinations as bigint)) Over (Partition by deaths.location Order by deaths.location, deaths.date) as CumulativeVaccinations
+From CovidDeaths as deaths
+Join CovidVaccinations as vaccines
+On deaths.date = vaccines.date and deaths.location = vaccines.location
+Where deaths.continent is Not NULL and deaths.total_cases is Not Null
+)
+
+Select *, round(Cast(CumulativeVaccinations as float) / Cast(Population as float) * 100, 2) as PercentVaccinated
+From PopulationVaccinated
+Where location like '%kingdom%'
+Order by location, date
+
+-- Temp table
+
+Drop Table if exists #PercentVaccinated
+Create Table #PercentVaccinated
+(continent nvarchar(255),
+location nvarchar(255),
+date datetime,
+population numeric,
+total_cases numeric,
+new_vaccinations numeric,
+CumulativeVaccinations numeric
+)
+
+Insert into #PercentVaccinated
+Select deaths.continent, deaths.location, deaths.date, deaths.population, deaths.total_cases, vaccines.new_vaccinations, sum(cast(vaccines.new_vaccinations as bigint)) Over (Partition by deaths.location Order by deaths.location, deaths.date) as CumulativeVaccinations
+From CovidDeaths as deaths
+Join CovidVaccinations as vaccines
+On deaths.date = vaccines.date and deaths.location = vaccines.location
+Where deaths.continent is Not NULL and deaths.total_cases is Not Null
+
+Select *, (CumulativeVaccinations / Population) * 100 as PercentVaccinated
+From #PercentVaccinated
+Where location like '%kingdom%'
+Order by location, date
+
+-- Create a view for visualisations
+
+Create View PercentVaccinated as
+Select deaths.continent, deaths.location, deaths.date, deaths.population, deaths.total_cases, vaccines.new_vaccinations, sum(cast(vaccines.new_vaccinations as bigint)) Over (Partition by deaths.location Order by deaths.location, deaths.date) as CumulativeVaccinations
+From CovidDeaths as deaths
+Join CovidVaccinations as vaccines
+On deaths.date = vaccines.date and deaths.location = vaccines.location
+Where deaths.continent is Not NULL and deaths.total_cases is Not Null
+
+Select *
+From PercentVaccinated
